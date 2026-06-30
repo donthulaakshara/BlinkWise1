@@ -2,6 +2,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import time
+import winsound
+import pygame
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -14,6 +16,15 @@ face_mesh = mp_face_mesh.FaceMesh(
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5
 )
+
+# Initialize sound system
+pygame.mixer.init()
+
+# Load reminder sound
+reminder_sound = pygame.mixer.Sound("assets/sounds/reminder.mp3")
+
+# Set sound volume
+reminder_sound.set_volume(1.0)
 
 # Webcam
 camera = cv2.VideoCapture(0)
@@ -29,6 +40,9 @@ CLOSED_EYES_FRAMES = 3
 # Variables
 blink_count = 0
 frame_counter = 0
+
+# Alert control
+alert_played = False
 
 # Calibration
 CALIBRATION_TIME = 10
@@ -237,12 +251,17 @@ while True:
         health_status = "BLINK NOW"
 
         status_color = (255, 80, 80)
+        if not alert_played:
+         reminder_sound.play()
+         alert_played = True
 
     else:
 
         health_status = "GOOD"
 
         status_color = (80, 255, 120)
+
+        alert_played=False
 
     # Glassmorphism overlay
     overlay = frame.copy()
