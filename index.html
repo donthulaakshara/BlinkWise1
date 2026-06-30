@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BlinkWise Smart Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background-color: #1a1a1a;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+        }
+        video {
+            transform: scaleX(-1); /* Flip webcam horizontally */
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        /* Glassmorphism Panel Dashboard */
+        #dashboard {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 380px;
+            background: rgba(30, 30, 30, 0.6);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        h2 { margin: 0 0 10px 0; font-size: 26px; font-weight: bold; }
+        hr { border: 0; border-top: 1px solid rgba(120, 120, 120, 0.5); margin: 10px 0 15px 0; }
+        .stat { font-size: 18px; margin-bottom: 12px; font-weight: 500; }
+        #stat-blinks { color: #78ff78; }
+        #stat-rate { color: #78d2ff; }
+        #stat-mode { color: #ffdc78; }
+        #stat-status { font-weight: bold; }
+        
+        /* Bottom Controls Indicator */
+        #controls-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            font-size: 14px;
+            color: #dcdcdc;
+            background: rgba(0,0,0,0.4);
+            padding: 5px 10px;
+            border-radius: 5px;
+        }
+        .btn {
+            background: #444; color: white; border: none; padding: 4px 8px; 
+            margin: 0 2px; border-radius: 3px; cursor: pointer; font-size: 12px;
+        }
+        .btn:hover { background: #666; }
+
+        /* Big Red Alert Banner */
+        #alert-banner {
+            display: none;
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background-color: rgba(180, 20, 20, 0.9);
+            color: white;
+            text-align: center;
+            padding: 20px 0;
+            font-size: 28px;
+            font-weight: bold;
+            animation: flash 1s infinite alternate;
+        }
+        @keyframes flash {
+            from { background-color: rgba(180, 20, 20, 0.9); }
+            to { background-color: rgba(250, 40, 40, 0.9); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="container">
+        <video id="webcam" autoplay playsinline></video>
+        
+        <div id="dashboard">
+            <h2>BlinkWise</h2>
+            <hr>
+            <div class="stat" id="stat-blinks">👁️ Blinks: <span id="val-blinks">0</span></div>
+            <div class="stat" id="stat-rate">📈 Rate: <span id="val-rate">0.0</span>/min</div>
+            <div class="stat" id="val-session">⏳ Session: 00:00</div>
+            <div class="stat" id="stat-mode">⚙️ Mode: <span id="val-mode">WORK</span></div>
+            <div class="stat">🚨 Status: <span id="val-status" style="color: #ffdc00;">CALIBRATING</span></div>
+        </div>
+
+        <div id="controls-hint">
+            Press: 
+            <button class="btn" onclick="setMode('GAMER', 20)">1 Gamer</button>
+            <button class="btn" onclick="setMode('WORK', 12)">2 Work</button>
+            <button class="btn" onclick="setMode('STUDENT', 8)">3 Student</button>
+        </div>
+
+        <div id="alert-banner">⚠️ PLEASE BLINK YOUR EYES</div>
+    </div>
+
+<script>
+    const videoElement = document.getElementById('webcam');
+    const alertBanner = document.getElementById('alert-banner');
+
+    // App state logic configured exactly to match your python values
+    let blinkCount = 0;
+    let frameCounter = 0;
+    const BLINK_THRESHOLD = 0.21; 
+    const CLOSED_EYES_FRAMES = 3;   
+    
+    let startTime = Date.now();
+    let lastBlinkTime = Date.now();
+    let currentMode = "WORK";
+    let alertSeconds = 12;
+
+    // Landmark Track Indices matching your Python variables
+    const LEFT_EYE = [33, 160, 158, 133, 153, 144];
+    const RIGHT_EYE = [362, 385, 387, 263, 373, 380];
+
+    function euclideanDistance(p1, p2) {
+        return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+    }
+
+    function calculateEar(eyePoints) {
+        const vertical1 = euclideanDistance(eyePoints[1], eyePoints[5]);
+        const vertical2 = euclideanDistance(eyePoints[2], eyePoints[4]);
+        const horizontal = euclideanDistance(eyePoints[0], eyePoints[3]);
+        return (vertical1 + vertical2) / (2.0 * horizontal);
+    }
+
+    function onResults(results) {
+        // UI Tracking Timers
+        const elapsedSeconds = (Date.now() - startTime) / 1000;
+        const elapsedMinutes = elapsedSeconds / 60;
+        
+        const displayMin = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
+        const displaySec = String(Math.floor(elapsedSeconds % 60)).padStart(2, '0');
+        document.getElementById('val-session').innerText = `⏳ Session: ${displayMin}:${displaySec}`;
+
+        // Calculate Rate
+        const blinkRate = elapsedMinutes > 0 ? (blinkCount / elapsedMinutes) : 0;
+        document.getElementById('val-rate').innerText = blinkRate.toFixed(1);
+
+        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+            const landmarks = results.multiFaceLandmarks[0];
+            
+            // Map landmarks into actual scale representation
+            const getPixelCoord = (idx) => ({
+                x: landmarks[idx].x * videoElement.videoWidth,
+                y: landmarks[idx].y * videoElement.videoHeight
+            });
+
+            const leftEyePoints = LEFT_EYE.map(getPixelCoord);
+            const rightEyePoints = RIGHT_EYE.map(getPixelCoord);
+
+            const leftEar = calculateEar(leftEyePoints);
+            const rightEar = calculateEar(rightEyePoints);
+            const averageEar = (leftEar + rightEar) / 2;
+
+            // Tracking logic
+            if (averageEar < BLINK_THRESHOLD) {
+                frameCounter++;
+            } else {
+                if (frameCounter >= CLOSED_EYES_FRAMES) {
+                    blinkCount++;
+                    lastBlinkTime = Date.now();
+                    document.getElementById('val-blinks').innerText = blinkCount;
+                }
+                frameCounter = 0;
+            }
+        }
+
+        // Status Management
+        const timeSinceLastBlink = (Date.now() - lastBlinkTime) / 1000;
+        const statusEl = document.getElementById('val-status');
+
+        if (elapsedMinutes < 0.5) {
+            statusEl.innerText = "CALIBRATING";
+            statusEl.style.color = "#ffdc00";
+            alertBanner.style.display = "none";
+        } else if (timeSinceLastBlink > alertSeconds) {
+            statusEl.innerText = "BLINK NOW";
+            statusEl.style.color = "#ff5050";
+            alertBanner.style.display = "block";
+        } else {
+            statusEl.innerText = "GOOD";
+            statusEl.style.color = "#50ff78";
+            alertBanner.style.display = "none";
+        }
+    }
+
+    // Initialize MediaPipe FaceMesh Engine
+    const faceMesh = new FaceMesh({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+
+    faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+    faceMesh.onResults(onResults);
+
+    // Instantiate Camera Util System
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            await faceMesh.send({ image: videoElement });
+        },
+        width: 640,
+        height: 480
+    });
+    camera.start();
+
+    // Configuration Handler for Dynamic Modes
+    function setMode(mode, seconds) {
+        currentMode = mode;
+        alertSeconds = seconds;
+        document.getElementById('val-mode').innerText = mode;
+    }
+
+    // Keyboard Hotkey Interceptor
+    window.addEventListener('keydown', (e) => {
+        if (e.key === '1') setMode('GAMER', 20);
+        if (e.key === '2') setMode('WORK', 12);
+        if (e.key === '3') setMode('STUDENT', 8);
+    });
+</script>
+</body>
+</html>
