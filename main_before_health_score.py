@@ -2,10 +2,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import time
-import pygame
+
 from PIL import Image, ImageDraw, ImageFont
-from health_score import calculate_health_score
-from fatigue_detector import detect_fatigue
 
 # MediaPipe setup
 mp_face_mesh = mp.solutions.face_mesh
@@ -16,15 +14,6 @@ face_mesh = mp_face_mesh.FaceMesh(
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5
 )
-
-# Initialize sound system
-pygame.mixer.init()
-
-# Load reminder sound
-reminder_sound = pygame.mixer.Sound("assets/sounds/reminder.mp3")
-
-# Set sound volume
-reminder_sound.set_volume(1.0)
 
 # Webcam
 camera = cv2.VideoCapture(0)
@@ -40,19 +29,6 @@ CLOSED_EYES_FRAMES = 3
 # Variables
 blink_count = 0
 frame_counter = 0
-alert_count = 0
-alert_active = False
-# Alert control
-alert_played = False
-
-# Calibration
-CALIBRATION_TIME = 10
-
-calibration_start = time.time()
-
-calibration_ears = []
-
-is_calibrated = False
 
 # Timers
 start_time = time.time()
@@ -253,37 +229,11 @@ while True:
 
         status_color = (255, 80, 80)
 
-        if not alert_played:
-         
-         reminder_sound.play()
-
-         alert_played = True
-
-        if not alert_active:
-            
-            alert_count+=1
-
-            alert_active=True
-
     else:
 
         health_status = "GOOD"
 
         status_color = (80, 255, 120)
-
-        alert_played=False
-
-        alert_active=False
-
-    #Calculate Health Score
-    health_score=calculate_health_score(
-        blink_rate,
-        session_minutes,
-        alert_count
-    )
-    fatigue_status, fatigue_color = detect_fatigue(
-    health_score
-    )
 
     # Glassmorphism overlay
     overlay = frame.copy()
@@ -291,7 +241,7 @@ while True:
     cv2.rectangle(
         overlay,
         (20, 20),
-        (420, 390),
+        (420, 290),
         (30, 30, 30),
         -1
     )
@@ -356,25 +306,11 @@ while True:
         data_font,
         (255, 220, 120)
     )
-    frame = draw_text(
-          frame,
-         f"❤️ Health      : {health_score}/100",
-        (45, 260),
-         data_font,
-         (255, 120, 120)
-    )
-    frame = draw_text(
-    frame,
-    f"Fatigue     : {fatigue_status}",
-    (45, 300),
-    data_font,
-    fatigue_color
-    )
 
     frame = draw_text(
         frame,
         f"🟢  Status       : {health_status}",
-        (45, 340),
+        (45, 260),
         data_font,
         status_color
     )
